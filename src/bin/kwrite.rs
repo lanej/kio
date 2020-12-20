@@ -1,53 +1,17 @@
 extern crate clap;
 
-use chrono::prelude::*;
 use clap::{App, Arg};
-use env_logger::Builder;
-use env_logger::fmt::Formatter;
 use log::info;
-use log::{LevelFilter, Record};
 use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
 use rdkafka::message::OwnedHeaders;
 use rdkafka::producer::{FutureProducer, FutureRecord};
-use std::io::Write;
-use std::thread;
 use std::time::Duration;
-
-pub fn setup_logger(log_thread: bool, rust_log: Option<&str>) {
-    let output_format = move |formatter: &mut Formatter, record: &Record| {
-        let thread_name = if log_thread {
-            format!("(t: {}) ", thread::current().name().unwrap_or("unknown"))
-        } else {
-            "".to_string()
-        };
-
-        let local_time: DateTime<Local> = Local::now();
-        let time_str = local_time.format("%H:%M:%S%.3f").to_string();
-        write!(
-            formatter,
-            "{} {}{} - {} - {}\n",
-            time_str,
-            thread_name,
-            record.level(),
-            record.target(),
-            record.args()
-        )
-    };
-
-    let mut builder = Builder::new();
-    builder
-        .format(output_format)
-        .filter(None, LevelFilter::Info);
-
-    rust_log.map(|conf| builder.parse_filters(conf));
-
-    builder.init();
-}
+use kio::logger;
 
 #[tokio::main]
 pub async fn main() {
-    setup_logger(false, None);
-    let matches = App::new("kread")
+    logger::logger(false, None);
+    let matches = App::new("kwrite")
         .version("0.1")
         .author("Josh Lane <me@joshualane.com>")
         .about("Spew Kafka messages to stdout")

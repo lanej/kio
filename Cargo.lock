@@ -523,6 +523,7 @@ dependencies = [
  "rand 0.3.23",
  "rdkafka",
  "regex",
+ "serde_json",
  "smol",
  "tokio",
 ]
