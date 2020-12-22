@@ -1,19 +1,17 @@
 extern crate clap;
 
 use clap::{App, Arg, SubCommand};
-use futures::StreamExt;
 use kio::{client, logger};
 use log::{error, warn};
 use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
-use rdkafka::consumer::stream_consumer::StreamConsumer;
+use rdkafka::consumer::base_consumer::BaseConsumer;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext};
 use rdkafka::message::Message;
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use std::io::BufRead;
+// use rdkafka::producer::base_producer::BaseProducer;
+// use std::io::BufRead;
 use std::time::Duration;
 
-#[tokio::main]
-pub async fn main() {
+pub fn main() {
     logger::logger(false, None);
 
     let matches = App::new("kread")
@@ -29,10 +27,23 @@ pub async fn main() {
                 .help("Broker URI authority"),
         )
         .arg(
-            Arg::with_name("v")
+            Arg::with_name("verbose")
                 .short("v")
                 .multiple(true)
                 .help("Sets the level of verbosity"),
+        )
+        .arg(
+            Arg::with_name("group")
+                .short("g")
+                .value_name("GROUP_ID")
+                .default_value("kio"),
+        )
+        .arg(
+            Arg::with_name("interval")
+                .short("i")
+                .value_name("POLL_INTERVAL")
+                .default_value("5")
+                .help("Interval in seconds to poll for new events"),
         )
         .subcommand(
             SubCommand::with_name("tail")
@@ -43,17 +54,6 @@ pub async fn main() {
                         .value_name("TOPIC")
                         .multiple(true)
                         .required(true),
-                )
-                .arg(
-                    Arg::with_name("group")
-                        .short("g")
-                        .value_name("GROUP_ID")
-                        .default_value("kio"),
-                )
-                .arg(
-                    Arg::with_name("from")
-                        .short("f")
-                        .help("Start from offset inclusive"),
                 ),
         )
         .subcommand(
@@ -76,15 +76,16 @@ pub async fn main() {
                         .required(true),
                 )
                 .arg(
-                    Arg::with_name("group")
-                        .short("g")
-                        .value_name("GROUP_ID")
-                        .default_value("kio"),
+                    Arg::with_name("to")
+                        .short("f")
+                        .alias("e")
+                        .help("End offset inclusive"),
                 )
                 .arg(
                     Arg::with_name("from")
-                        .short("f")
-                        .help("Start from offset inclusive"),
+                        .short("s")
+                        .min_values(0)
+                        .help("Starting offset inclusive"),
                 ),
         )
         .get_matches();
@@ -98,39 +99,48 @@ pub async fn main() {
         _ => RDKafkaLogLevel::Warning,
     };
 
+    let group = matches.value_of("group").unwrap();
+    let config = client::config(group, brokers, log_level);
+    let interval = matches
+        .value_of("interval")
+        .unwrap()
+        .parse()
+        .expect("from must be an integer");
+    dbg!(matches.subcommand_name());
+
     match matches.subcommand() {
         ("tail", Some(tail_m)) => {
             let topics: Vec<&str> = tail_m.values_of("topics").unwrap().collect();
-            let group = tail_m.value_of("group").unwrap();
-            let config = client::config(group, brokers, log_level);
-            tail(config, topics).await;
+            tail(config, topics, interval);
         }
         ("read", Some(read_m)) => {
             let topic = read_m.value_of("topic").unwrap();
-            let group = read_m.value_of("group").unwrap();
-            let config = client::config(group, brokers, log_level);
-            read(config, topic).await;
+            let from = read_m
+                .value_of("from")
+                .unwrap()
+                .parse()
+                .expect("from must be an integer");
+            let to = read_m
+                .value_of("to")
+                .unwrap()
+                .parse()
+                .expect("to must be an integer");
+            read(config, topic, interval, from, to);
         }
-        ("write", Some(write_m)) => {
-            let topic = write_m.value_of("topic").unwrap();
-            let group = write_m.value_of("group").unwrap();
-            let config = client::config(group, brokers, log_level);
-            write(
-                config,
-                topic,
-                std::io::stdin()
-                    .lock()
-                    .lines()
-                    .filter_map(|l| l.ok()),
-            )
-            .await;
+        ("write", Some(_write_m)) => {
+            // let topic = write_m.value_of("topic").unwrap();
+            // write(
+            //     config,
+            //     topic,
+            //     std::io::stdin().lock().lines().filter_map(|l| l.ok()),
+            // );
         }
         _ => {}
     };
 }
 
-async fn tail(config: ClientConfig, topics: Vec<&str>) {
-    let consumer: StreamConsumer<DefaultConsumerContext> = config
+fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64) {
+    let consumer: BaseConsumer<DefaultConsumerContext> = config
         .create_with_context(rdkafka::consumer::DefaultConsumerContext)
         .expect("Consumer creation failed");
 
@@ -138,84 +148,83 @@ async fn tail(config: ClientConfig, topics: Vec<&str>) {
         .subscribe(&topics)
         .expect("Can't subscribe to specified topics");
 
-    let mut message_stream = consumer.start();
+    loop {
+        match consumer.poll(Duration::from_secs(interval)) {
+            Some(message) => match message {
+                Err(e) => warn!("Kafka error: {}", e),
+                Ok(m) => {
+                    let payload = match m.payload_view::<str>() {
+                        None => "",
+                        Some(Ok(s)) => s,
+                        Some(Err(e)) => {
+                            warn!("Error while deserializing message payload: {:?}", e);
+                            ""
+                        }
+                    };
 
-    while let Some(message) = message_stream.next().await {
-        match message {
-            Err(e) => warn!("Kafka error: {}", e),
-            Ok(m) => {
-                let payload = match m.payload_view::<str>() {
-                    None => "",
-                    Some(Ok(s)) => s,
-                    Some(Err(e)) => {
-                        warn!("Error while deserializing message payload: {:?}", e);
-                        ""
-                    }
-                };
-
-                match serde_json::from_str::<serde_json::Value>(payload) {
-                    Ok(body) => println!("{}", body),
-                    Err(err) => error!("Failed to parse JSON body: {}", err),
-                };
-            }
-        };
+                    match serde_json::from_str::<serde_json::Value>(payload) {
+                        Ok(body) => println!("{}", body),
+                        Err(err) => error!("Failed to parse JSON body: {}", err),
+                    };
+                }
+            },
+            _ => {}
+        }
     }
 }
 
-async fn read(config: ClientConfig, topic: &str) {
-    let consumer: StreamConsumer<DefaultConsumerContext> = config
+fn read(config: ClientConfig, topic: &str, interval: u64, from: i64, to: i64) {
+    let consumer: BaseConsumer<DefaultConsumerContext> = config
         .create_with_context(rdkafka::consumer::DefaultConsumerContext)
         .expect("Consumer creation failed");
+
+    consumer
+        .subscribe(&[topic])
+        .expect("Can't subscribe to specified topics");
 
     consumer
         .seek(
             topic,
             1,
-            rdkafka::Offset::from_raw(0),
+            rdkafka::Offset::from_raw(from),
             std::time::Duration::from_secs(60),
         )
         .expect("Failed to seek to offset");
-    consumer
-        .subscribe(&[topic])
-        .expect("Can't subscribe to specified topics");
 
-    let mut message_stream = consumer.start();
-
-    while let Some(message) = message_stream.next().await {
-        match message {
-            Err(e) => warn!("Kafka error: {}", e),
-            Ok(m) => {
-                let payload = match m.payload_view::<str>() {
-                    None => "",
-                    Some(Ok(s)) => s,
-                    Some(Err(e)) => {
-                        warn!("Error while deserializing message payload: {:?}", e);
-                        ""
+    loop {
+        match consumer.poll(Duration::from_secs(interval)) {
+            Some(message) => match message {
+                Err(e) => warn!("Kafka error: {}", e),
+                Ok(m) => {
+                    if m.offset() > to {
+                        break;
                     }
-                };
+                    let payload = match m.payload_view::<str>() {
+                        None => "",
+                        Some(Ok(s)) => s,
+                        Some(Err(e)) => {
+                            warn!("Error while deserializing message payload: {:?}", e);
+                            ""
+                        }
+                    };
 
-                match serde_json::from_str::<serde_json::Value>(payload) {
-                    Ok(body) => println!("{}", body),
-                    Err(err) => error!("Failed to parse JSON body: {}", err),
-                };
-            }
-        };
+                    match serde_json::from_str::<serde_json::Value>(payload) {
+                        Ok(body) => println!("{}", body),
+                        Err(err) => eprintln!("Failed to parse JSON body: {}", err),
+                    };
+                }
+            },
+            _ => {}
+        }
     }
 }
 
-async fn write(config: ClientConfig, topic: &str, messages: impl Iterator<Item = String>) {
-    let producer: &FutureProducer = &config.create().expect("Producer creation failed");
-    let futures = messages
-        .map(|message| {
-            async move {
-                let record: FutureRecord<String, String> =
-                    FutureRecord::to(topic).payload(&message);
-                producer.send(record, Duration::from_secs(0)).await
-            }
-        })
-        .collect::<Vec<_>>();
-
-    for future in futures {
-        future.await.unwrap();
-    }
-}
+// fn write(config: ClientConfig, topic: &str, messages: impl Iterator<Item = String>) {
+//     let producer: &BaseProducer = &config.create().expect("Producer creation failed");
+// let futures = messages
+//     .map(|message| {
+//             let record: FutureRecord<String, String> =
+//                 FutureRecord::to(topic).payload(&message);
+//             producer.send(record, Duration::from_secs(0)).await
+//     })
+// }

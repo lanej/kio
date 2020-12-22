@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 backoff = "0.1.5"
 chrono = "0.4.0"
-clap = "~2.27.0"
+clap = "2.33"
 env_logger = "0.7.1"
 futures = "0.3"
 hdrhistogram = "7.0.0"
