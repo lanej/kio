@@ -5,7 +5,7 @@ extern crate prettytable;
 use clap::{App, Arg, SubCommand};
 use kio::{client, logger};
 use log::{error, info, warn};
-use prettytable::{Cell, Row, Table};
+use prettytable::Table;
 use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
 use rdkafka::consumer::base_consumer::BaseConsumer;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext};
@@ -98,7 +98,7 @@ pub fn main() {
                         .alias("b")
                         .default_value("0")
                         .value_name("OFFSET")
-                        .help("Starting offset inclusive"),
+                        .help("Starting offset exclusive"),
                 ),
         )
         .subcommand(
@@ -111,6 +111,7 @@ pub fn main() {
                         .required(true),
                 ),
         )
+        .subcommand(SubCommand::with_name("topics").about("List topics"))
         .get_matches();
 
     let brokers: Vec<&str> = matches.values_of("brokers").unwrap().collect();
@@ -149,6 +150,29 @@ pub fn main() {
         ("partitions", Some(partition_m)) => {
             let topic = partition_m.value_of("topic").unwrap();
             partitions(config, topic);
+        }
+        ("topics", Some(_topic_m)) => {
+            let mut table = Table::new();
+            table.add_row(row![bFg=>
+                "Topic",
+                "Partition ID",
+                "Partition Leader",
+                "Partition Replicas",
+                "Low Watermark",
+                "High Watermark",
+            ]);
+            topics(config).for_each(|topic| {
+                table.add_row(row![
+                    topic.name,
+                    topic.partition_id,
+                    topic.partition_leader_id,
+                    topic.partition_replicas,
+                    topic.low_watermark,
+                    topic.high_watermark,
+                ]);
+            });
+
+            table.print_tty(true);
         }
         ("write", Some(write_m)) => {
             let topic = write_m.value_of("topic").unwrap();
@@ -212,54 +236,34 @@ fn read(mut config: ClientConfig, topic: &str, interval: u64, from: Option<i64>,
         .expect("Consumer creation failed");
 
     let poll_interval = Duration::from_secs(interval);
-    // let partition_id = consumer
-    //     .fetch_metadata(Some(topic), poll_interval)
-    //     .unwrap()
-    //     .topics()
-    //     .first()
-    //     .unwrap()
-    //     .partitions()
-    //     .first()
-    //     .unwrap()
-    //     .id();
+    // FIXME: allow partition to be specified or calculated
     let partition_id = 0;
     let (min_offset, max_offset) = consumer
         .fetch_watermarks(topic, partition_id, poll_interval)
         .unwrap();
 
     let first_offset = match from {
-        Some(from_offset) => Offset::Offset(std::cmp::max(from_offset, min_offset)),
+        Some(from_offset) => {
+            if from_offset < 0 {
+                Offset::Offset(max_offset - from_offset)
+            } else {
+                Offset::Offset(std::cmp::max(from_offset, min_offset))
+            }
+        }
         None => Offset::Beginning,
     };
     let last_offset = to.unwrap_or(max_offset);
 
-    dbg!((min_offset, max_offset, first_offset, last_offset));
-
-    dbg!(partition_id);
     let mut topic_partitions = TopicPartitionList::new();
     topic_partitions.add_partition_offset(topic, 0, first_offset);
-    dbg!(consumer.assign(&topic_partitions).unwrap());
-    dbg!(consumer.assignment().unwrap());
-
-    // consumer
-    //     .subscribe(&[topic])
-    //     .expect("Can'rdkafkat subscribe to specified topics");
-
-    // consumer
-    //     .seek(
-    //         topic,
-    //         0,
-    //         Offset::End,
-    //         std::time::Duration::from_secs(10),
-    //     )
-    //     .expect("Failed to seek to offset");
+    consumer.assign(&topic_partitions).unwrap();
 
     loop {
         match consumer.poll(poll_interval) {
             Some(message) => match message {
                 Err(e) => warn!("Kafka error: {}", e),
                 Ok(m) => {
-                    if m.offset() > last_offset {
+                    if m.offset() >= last_offset {
                         break;
                     }
                     let payload = match m.payload_view::<str>() {
@@ -320,10 +324,6 @@ fn partitions(config: ClientConfig, topic: &str) {
         "High Watermark",
     ]);
 
-    // metadata.brokers().iter().for_each(|b| {
-    //     table.add_row(row![b.host(), b.port()]);
-    // });
-
     metadata.topics().iter().for_each(|topic| {
         topic.partitions().iter().for_each(|partition| {
             let (low_watermark, high_watermark) = consumer
@@ -340,4 +340,56 @@ fn partitions(config: ClientConfig, topic: &str) {
     });
 
     table.print_tty(true);
+}
+
+struct Topic {
+    name: String,
+    partition_id: i32,
+    partition_leader_id: i32,
+    partition_replicas: usize,
+    low_watermark: i64,
+    high_watermark: i64,
+}
+
+fn topics(config: ClientConfig) -> impl Iterator<Item = Topic> {
+    let consumer: BaseConsumer<DefaultConsumerContext> = config
+        .create_with_context(rdkafka::consumer::DefaultConsumerContext)
+        .expect("Consumer creation failed");
+
+    let metadata = consumer
+        .fetch_metadata(None, Duration::from_secs(10))
+        .unwrap();
+
+    let topic_names = metadata
+        .topics()
+        .iter()
+        .filter(|topic| !topic.name().starts_with("__"));
+
+    topic_names
+        .flat_map(|topic| {
+            topic
+                .partitions()
+                .iter()
+                .map(|partition| {
+                    let (low_watermark, high_watermark) = consumer
+                        .fetch_watermarks(
+                            topic.name().into(),
+                            partition.id(),
+                            Duration::from_secs(1),
+                        )
+                        .unwrap();
+
+                    Topic {
+                        name: topic.name().into(),
+                        partition_id: partition.id(),
+                        partition_leader_id: partition.leader(),
+                        partition_replicas: partition.replicas().len(),
+                        low_watermark,
+                        high_watermark,
+                    }
+                })
+                .collect::<Vec<Topic>>()
+        })
+        .collect::<Vec<Topic>>()
+        .into_iter()
 }
