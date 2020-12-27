@@ -11,6 +11,7 @@ use rdkafka::consumer::base_consumer::BaseConsumer;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext};
 use rdkafka::message::Message;
 use rdkafka::producer::base_producer::{BaseProducer, BaseRecord};
+use rdkafka::{Offset, TopicPartitionList};
 use std::io::BufRead;
 use std::time::{Duration, Instant};
 
@@ -87,14 +88,16 @@ pub fn main() {
                 )
                 .arg(
                     Arg::with_name("to")
-                        .short("f")
-                        .alias("e")
+                        .short("e")
+                        .value_name("OFFSET")
                         .help("End offset inclusive"),
                 )
                 .arg(
                     Arg::with_name("from")
                         .short("s")
+                        .alias("b")
                         .default_value("0")
+                        .value_name("OFFSET")
                         .help("Starting offset inclusive"),
                 ),
         )
@@ -141,7 +144,7 @@ pub fn main() {
                 .parse()
                 .expect("from must be an integer");
             let to: Option<i64> = read_m.value_of("to").map(|t| t.parse().unwrap());
-            read(config, topic, interval, from, to);
+            read(config, topic, interval, Some(from), to);
         }
         ("partitions", Some(partition_m)) => {
             let topic = partition_m.value_of("topic").unwrap();
@@ -202,44 +205,54 @@ fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64) {
     }
 }
 
-fn read(config: ClientConfig, topic: &str, interval: u64, from: i64, to: Option<i64>) {
+fn read(mut config: ClientConfig, topic: &str, interval: u64, from: Option<i64>, to: Option<i64>) {
     let consumer: BaseConsumer<DefaultConsumerContext> = config
+        .set("enable.partition.eof", "true")
         .create_with_context(rdkafka::consumer::DefaultConsumerContext)
         .expect("Consumer creation failed");
 
     let poll_interval = Duration::from_secs(interval);
-    let partition_id = consumer
-        .fetch_metadata(Some(topic), poll_interval)
-        .unwrap()
-        .topics()
-        .first()
-        .unwrap()
-        .partitions()
-        .first()
-        .unwrap()
-        .id();
+    // let partition_id = consumer
+    //     .fetch_metadata(Some(topic), poll_interval)
+    //     .unwrap()
+    //     .topics()
+    //     .first()
+    //     .unwrap()
+    //     .partitions()
+    //     .first()
+    //     .unwrap()
+    //     .id();
+    let partition_id = 0;
     let (min_offset, max_offset) = consumer
         .fetch_watermarks(topic, partition_id, poll_interval)
         .unwrap();
+
+    let first_offset = match from {
+        Some(from_offset) => Offset::Offset(std::cmp::max(from_offset, min_offset)),
+        None => Offset::Beginning,
+    };
     let last_offset = to.unwrap_or(max_offset);
-    let first_offset = std::cmp::max(from, min_offset);
 
     dbg!((min_offset, max_offset, first_offset, last_offset));
 
-    consumer
-        .subscribe(&[topic])
-        .expect("Can't subscribe to specified topics");
-
     dbg!(partition_id);
+    let mut topic_partitions = TopicPartitionList::new();
+    topic_partitions.add_partition_offset(topic, 0, first_offset);
+    dbg!(consumer.assign(&topic_partitions).unwrap());
+    dbg!(consumer.assignment().unwrap());
 
-    consumer
-        .seek(
-            topic,
-            partition_id,
-            rdkafka::Offset::Offset(124),
-            std::time::Duration::from_secs(1),
-        )
-        .expect("Failed to seek to offset");
+    // consumer
+    //     .subscribe(&[topic])
+    //     .expect("Can'rdkafkat subscribe to specified topics");
+
+    // consumer
+    //     .seek(
+    //         topic,
+    //         0,
+    //         Offset::End,
+    //         std::time::Duration::from_secs(10),
+    //     )
+    //     .expect("Failed to seek to offset");
 
     loop {
         match consumer.poll(poll_interval) {
