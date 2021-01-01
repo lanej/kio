@@ -399,33 +399,35 @@ fn topics(config: ClientConfig) -> impl Iterator<Item = Topic> {
         .into_iter()
 }
 
-struct OffsetRange(std::ops::Range<Option<OffsetPosition>>);
+struct OffsetRange {
+    start: OffsetPosition,
+    end: OffsetPosition,
+}
 
 impl OffsetRange {
     fn offsets(&self, min: i64, max: i64) -> (Offset, i64) {
-        let seek_to = match &self.0.start {
-            None => Offset::Beginning,
-            Some(op) => match op {
-                OffsetPosition::Positive(p) => Offset::Offset(min + p),
-                OffsetPosition::Negative(p) => Offset::Offset(max - p - 2),
-                OffsetPosition::Absolute(p) => Offset::Offset(*p),
-            },
+        let seek_to = match &self.start {
+            OffsetPosition::Unspecified => Offset::Beginning,
+            OffsetPosition::Positive(p) => Offset::Offset(min + p),
+            OffsetPosition::Negative(p) => Offset::Offset(max - p - 2),
+            OffsetPosition::Absolute(p) => Offset::Offset(*p),
         };
 
-        let stop_at = match &self.0.end {
-            None => max,
-            Some(op) => match op {
-                OffsetPosition::Positive(p) => min + p,
-                OffsetPosition::Negative(p) => max - p - 1,
-                OffsetPosition::Absolute(p) => *p,
-            },
+        let stop_at = match &self.end {
+            OffsetPosition::Unspecified => max,
+            OffsetPosition::Positive(p) => min + p,
+            OffsetPosition::Negative(p) => max - p - 1,
+            OffsetPosition::Absolute(p) => *p,
         };
 
         (seek_to, stop_at)
     }
 }
+
+
 #[derive(Debug)]
 enum OffsetPosition {
+    Unspecified,
     Positive(i64),
     Negative(i64),
     Absolute(i64),
@@ -433,17 +435,21 @@ enum OffsetPosition {
 
 impl std::convert::From<(Option<&str>, Option<&str>)> for OffsetRange {
     fn from((from, to): (Option<&str>, Option<&str>)) -> Self {
-        OffsetRange(std::ops::Range {
-            start: from.map(|v| match v.chars().nth(0).unwrap() {
-                '+' => OffsetPosition::Positive(v.get(1..).unwrap().parse().unwrap()),
-                '-' => OffsetPosition::Negative(v.get(1..).unwrap().parse().unwrap()),
-                _ => OffsetPosition::Absolute(v.parse().unwrap()),
-            }),
-            end: to.map(|v| match v.chars().nth(0).unwrap() {
-                '+' => OffsetPosition::Positive(v.get(1..).unwrap().parse().unwrap()),
-                '-' => OffsetPosition::Negative(v.get(1..).unwrap().parse().unwrap()),
-                _ => OffsetPosition::Absolute(v.parse().unwrap()),
-            }),
-        })
+        OffsetRange {
+            start: from
+                .map(|v| match v.chars().nth(0).unwrap() {
+                    '+' => OffsetPosition::Positive(v.get(1..).unwrap().parse().unwrap()),
+                    '-' => OffsetPosition::Negative(v.get(1..).unwrap().parse().unwrap()),
+                    _ => OffsetPosition::Absolute(v.parse().unwrap()),
+                })
+                .unwrap_or(OffsetPosition::Unspecified),
+            end: to
+                .map(|v| match v.chars().nth(0).unwrap() {
+                    '+' => OffsetPosition::Positive(v.get(1..).unwrap().parse().unwrap()),
+                    '-' => OffsetPosition::Negative(v.get(1..).unwrap().parse().unwrap()),
+                    _ => OffsetPosition::Absolute(v.parse().unwrap()),
+                })
+                .unwrap_or(OffsetPosition::Unspecified),
+        }
     }
 }
