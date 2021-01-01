@@ -4,7 +4,7 @@ extern crate prettytable;
 
 use clap::{App, Arg, SubCommand};
 use kio::{client, logger};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use prettytable::Table;
 use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
 use rdkafka::consumer::base_consumer::BaseConsumer;
@@ -84,20 +84,27 @@ pub fn main() {
                     Arg::with_name("topic")
                         .short("t")
                         .value_name("TOPIC")
+                        .multiple(true)
                         .required(true),
                 )
                 .arg(
-                    Arg::with_name("to")
+                    Arg::with_name("end")
+                        .long("end")
                         .short("e")
                         .value_name("OFFSET")
+                        .default_value("-1")
+                        .allow_hyphen_values(true)
+                        .required(true)
                         .help("End offset inclusive"),
                 )
                 .arg(
-                    Arg::with_name("from")
+                    Arg::with_name("start")
+                        .long("start")
                         .short("s")
-                        .alias("b")
                         .default_value("0")
                         .value_name("OFFSET")
+                        .allow_hyphen_values(true)
+                        .required(true)
                         .help("Starting offset exclusive"),
                 ),
         )
@@ -138,14 +145,12 @@ pub fn main() {
         }
         // ("list" => Some(list_m) => { },
         ("read", Some(read_m)) => {
-            let topic = read_m.value_of("topic").unwrap();
-            let from: i64 = read_m
-                .value_of("from")
-                .unwrap()
-                .parse()
-                .expect("from must be an integer");
-            let to: Option<i64> = read_m.value_of("to").map(|t| t.parse().unwrap());
-            read(config, topic, interval, Some(from), to);
+            read(
+                config,
+                read_m.value_of("topic").expect("No topic specified"),
+                interval,
+                OffsetRange::from((read_m.value_of("start"), read_m.value_of("end"))),
+            );
         }
         ("partitions", Some(partition_m)) => {
             let topic = partition_m.value_of("topic").unwrap();
@@ -229,7 +234,7 @@ fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64) {
     }
 }
 
-fn read(mut config: ClientConfig, topic: &str, interval: u64, from: Option<i64>, to: Option<i64>) {
+fn read(mut config: ClientConfig, topic: &str, interval: u64, range: OffsetRange) {
     let consumer: BaseConsumer<DefaultConsumerContext> = config
         .set("enable.partition.eof", "true")
         .create_with_context(rdkafka::consumer::DefaultConsumerContext)
@@ -242,20 +247,11 @@ fn read(mut config: ClientConfig, topic: &str, interval: u64, from: Option<i64>,
         .fetch_watermarks(topic, partition_id, poll_interval)
         .unwrap();
 
-    let first_offset = match from {
-        Some(from_offset) => {
-            if from_offset < 0 {
-                Offset::Offset(max_offset - from_offset)
-            } else {
-                Offset::Offset(std::cmp::max(from_offset, min_offset))
-            }
-        }
-        None => Offset::Beginning,
-    };
-    let last_offset = to.unwrap_or(max_offset);
+    let (seek_to, stop_at) = range.offsets(min_offset, max_offset);
 
     let mut topic_partitions = TopicPartitionList::new();
-    topic_partitions.add_partition_offset(topic, 0, first_offset);
+    // TODO: partition can be specified
+    topic_partitions.add_partition_offset(topic, 0, seek_to);
     consumer.assign(&topic_partitions).unwrap();
 
     loop {
@@ -263,7 +259,7 @@ fn read(mut config: ClientConfig, topic: &str, interval: u64, from: Option<i64>,
             Some(message) => match message {
                 Err(e) => warn!("Kafka error: {}", e),
                 Ok(m) => {
-                    if m.offset() >= last_offset {
+                    if m.offset() >= stop_at {
                         break;
                     }
                     let payload = match m.payload_view::<str>() {
@@ -276,12 +272,22 @@ fn read(mut config: ClientConfig, topic: &str, interval: u64, from: Option<i64>,
                     };
 
                     match serde_json::from_str::<serde_json::Value>(payload) {
-                        Ok(body) => println!("{}", body),
+                        Ok(body) => {
+                            println!(
+                                "{}",
+                                serde_json::json!({
+                                    "offset": m.offset(),
+                                    "partition": m.partition(),
+                                    "timestamp": m.timestamp().to_millis(),
+                                    "payload": body
+                                })
+                            );
+                        }
                         Err(err) => eprintln!("Failed to parse JSON body: {}", err),
                     };
                 }
             },
-            _ => {}
+            _ => debug!("No messages received during last poll"),
         }
     }
 }
@@ -360,18 +366,16 @@ fn topics(config: ClientConfig) -> impl Iterator<Item = Topic> {
         .fetch_metadata(None, Duration::from_secs(10))
         .unwrap();
 
-    let topic_names = metadata
+    metadata
         .topics()
         .iter()
-        .filter(|topic| !topic.name().starts_with("__"));
-
-    topic_names
-        .flat_map(|topic| {
+        .filter(|topic| !topic.name().starts_with("__"))
+        .map(|topic| {
             topic
                 .partitions()
                 .iter()
                 .map(|partition| {
-                    let (low_watermark, high_watermark) = consumer
+                    let (low_watermark, high_watermark) = (&consumer)
                         .fetch_watermarks(
                             topic.name().into(),
                             partition.id(),
@@ -390,6 +394,56 @@ fn topics(config: ClientConfig) -> impl Iterator<Item = Topic> {
                 })
                 .collect::<Vec<Topic>>()
         })
+        .flatten()
         .collect::<Vec<Topic>>()
         .into_iter()
+}
+
+struct OffsetRange(std::ops::Range<Option<OffsetPosition>>);
+
+impl OffsetRange {
+    fn offsets(&self, min: i64, max: i64) -> (Offset, i64) {
+        let seek_to = match &self.0.start {
+            None => Offset::Beginning,
+            Some(op) => match op {
+                OffsetPosition::Positive(p) => Offset::Offset(min + p),
+                OffsetPosition::Negative(p) => Offset::Offset(max - p - 2),
+                OffsetPosition::Absolute(p) => Offset::Offset(*p),
+            },
+        };
+
+        let stop_at = match &self.0.end {
+            None => max,
+            Some(op) => match op {
+                OffsetPosition::Positive(p) => min + p,
+                OffsetPosition::Negative(p) => max - p - 1,
+                OffsetPosition::Absolute(p) => *p,
+            },
+        };
+
+        (seek_to, stop_at)
+    }
+}
+#[derive(Debug)]
+enum OffsetPosition {
+    Positive(i64),
+    Negative(i64),
+    Absolute(i64),
+}
+
+impl std::convert::From<(Option<&str>, Option<&str>)> for OffsetRange {
+    fn from((from, to): (Option<&str>, Option<&str>)) -> Self {
+        OffsetRange(std::ops::Range {
+            start: from.map(|v| match v.chars().nth(0).unwrap() {
+                '+' => OffsetPosition::Positive(v.get(1..).unwrap().parse().unwrap()),
+                '-' => OffsetPosition::Negative(v.get(1..).unwrap().parse().unwrap()),
+                _ => OffsetPosition::Absolute(v.parse().unwrap()),
+            }),
+            end: to.map(|v| match v.chars().nth(0).unwrap() {
+                '+' => OffsetPosition::Positive(v.get(1..).unwrap().parse().unwrap()),
+                '-' => OffsetPosition::Negative(v.get(1..).unwrap().parse().unwrap()),
+                _ => OffsetPosition::Absolute(v.parse().unwrap()),
+            }),
+        })
+    }
 }
