@@ -1,5 +1,5 @@
 [package]
-name = "kio"
+name = "kafka-io"
 version = "0.1.0"
 authors = ["Joshua Lane <me@joshualane.com>"]
 edition = "2018"
