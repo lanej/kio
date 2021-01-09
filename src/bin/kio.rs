@@ -3,7 +3,7 @@ extern crate clap;
 extern crate prettytable;
 
 use clap::{App, Arg, SubCommand};
-use kio::{client, logger};
+use kafka_io::{client, logger};
 use log::{debug, error, info, warn};
 use prettytable::Table;
 use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
