@@ -5,6 +5,7 @@ authors = ["Joshua Lane <me@joshualane.com>"]
 edition = "2018"
 license = "MIT"
 homepage = "https://github.com/lanej/kio"
+description = "Easily read, write from and interact with Apache Kafka"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
