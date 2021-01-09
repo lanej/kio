@@ -58,6 +58,12 @@ pub fn main() {
                         .value_name("TOPIC")
                         .multiple(true)
                         .required(true),
+                )
+                .arg(
+                    Arg::with_name("full")
+                        .long("full")
+                        .short("f")
+                        .help("Encapsulate payload in the message metadata"),
                 ),
         )
         .subcommand(
@@ -141,7 +147,8 @@ pub fn main() {
     match matches.subcommand() {
         ("tail", Some(tail_m)) => {
             let topics: Vec<&str> = tail_m.values_of("topics").unwrap().collect();
-            tail(config, topics, interval);
+            let full = tail_m.is_present("full");
+            tail(config, topics, interval, full);
         }
         // ("list" => Some(list_m) => { },
         ("read", Some(read_m)) => {
@@ -200,7 +207,7 @@ pub fn main() {
     };
 }
 
-fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64) {
+fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64, full: bool) {
     let consumer: BaseConsumer<DefaultConsumerContext> = config
         .create_with_context(rdkafka::consumer::DefaultConsumerContext)
         .expect("Consumer creation failed");
@@ -214,7 +221,7 @@ fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64) {
             Some(message) => match message {
                 Err(e) => warn!("Kafka error: {}", e),
                 Ok(m) => {
-                    let payload = match m.payload_view::<str>() {
+                    let raw_payload = match m.payload_view::<str>() {
                         None => "",
                         Some(Ok(s)) => s,
                         Some(Err(e)) => {
@@ -223,8 +230,30 @@ fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64) {
                         }
                     };
 
-                    match serde_json::from_str::<serde_json::Value>(payload) {
-                        Ok(body) => println!("{}", body),
+                    match serde_json::from_str::<serde_json::Value>(raw_payload) {
+                        Ok(payload) => {
+                            if full {
+                                let timestamp = match m.timestamp() {
+                                    rdkafka::message::Timestamp::NotAvailable => String::new(),
+                                    rdkafka::message::Timestamp::CreateTime(t)
+                                    | rdkafka::message::Timestamp::LogAppendTime(t) => {
+                                        format!("{}", t)
+                                    }
+                                };
+                                println!(
+                                    "{}",
+                                    serde_json::json!({
+                                        "key": m.key(),
+                                        "partition": m.partition(),
+                                        "offset": m.offset(),
+                                        "timestamp": timestamp,
+                                        "payload": payload,
+                                    })
+                                );
+                            } else {
+                                println!("{}", payload)
+                            }
+                        }
                         Err(err) => error!("Failed to parse JSON body: {}", err),
                     };
                 }
@@ -302,7 +331,7 @@ fn write(config: ClientConfig, topic: &str, interval: u64, messages: impl Iterat
             .expect("Failed to send message");
 
         if next_flush > Instant::now() {
-            info!("flushing {} messages", producer.in_flight_count());
+            debug!("flushing {} messages", producer.in_flight_count());
             producer.flush(poll_interval);
             next_flush = Instant::now() + poll_interval;
         }
@@ -423,7 +452,6 @@ impl OffsetRange {
         (seek_to, stop_at)
     }
 }
-
 
 #[derive(Debug)]
 enum OffsetPosition {
