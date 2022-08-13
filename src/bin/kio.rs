@@ -18,10 +18,10 @@ use std::time::{Duration, Instant};
 pub fn main() {
     logger::logger(false, None);
 
-    let matches = App::new("kread")
+    let matches = App::new("kio")
         .version("0.1")
         .author("Josh Lane <me@joshualane.com>")
-        .about("Spew Kafka messages to stdout")
+        .about("Interact with Kafka over stdout/stdin")
         .arg(
             Arg::with_name("brokers")
                 .short("b")
@@ -59,6 +59,26 @@ pub fn main() {
                         .multiple(true)
                         .required(true),
                 )
+        .arg(
+            Arg::with_name("brokers")
+                .short("b")
+                .value_name("host[:port]")
+                .default_value("localhost:9092")
+                .multiple(true)
+                .help("Broker URI authority"),
+        )
+        .arg(
+            Arg::with_name("verbose")
+                .short("v")
+                .multiple(true)
+                .help("Sets the level of verbosity"),
+        )
+        .arg(
+            Arg::with_name("group")
+                .short("g")
+                .value_name("GROUP_ID")
+                .default_value("kio"),
+        )
                 .arg(
                     Arg::with_name("full")
                         .long("full")
@@ -69,29 +89,72 @@ pub fn main() {
         .subcommand(
             SubCommand::with_name("write")
                 .about("Write an NLD set of messages to a given topic")
+        .arg(
+            Arg::with_name("brokers")
+                .short("b")
+                .value_name("host[:port]")
+                .default_value("localhost:9092")
+                .multiple(true)
+                .help("Broker URI authority"),
+        )
+        .arg(
+            Arg::with_name("verbose")
+                .short("v")
+                .multiple(true)
+                .help("Sets the level of verbosity"),
+        )
+        .arg(
+            Arg::with_name("group")
+                .short("g")
+                .value_name("GROUP_ID")
+                .default_value("kio"),
+        )
                 .arg(
                     Arg::with_name("topic")
                         .short("t")
                         .value_name("TOPIC")
-                        .required(true),
+                        .required(true)
+                        .help("Topic name"),
                 )
                 .arg(
                     Arg::with_name("buffer_size")
                         .short("s")
                         .value_name("UINT")
                         .default_value("100")
-                        .required(true),
+                        .required(true)
+                        .help("Buffer size"),
                 ),
         )
         .subcommand(
             SubCommand::with_name("read")
                 .about("Read a specific range of messages from a given topic")
+        .arg(
+            Arg::with_name("brokers")
+                .short("b")
+                .value_name("host[:port]")
+                .default_value("localhost:9092")
+                .multiple(true)
+                .help("Broker URI authority"),
+        )
+        .arg(
+            Arg::with_name("verbose")
+                .short("v")
+                .multiple(true)
+                .help("Sets the level of verbosity"),
+        )
+        .arg(
+            Arg::with_name("group")
+                .short("g")
+                .value_name("GROUP_ID")
+                .default_value("kio"),
+        )
                 .arg(
                     Arg::with_name("topic")
                         .short("t")
                         .value_name("TOPIC")
                         .multiple(true)
-                        .required(true),
+                        .required(true)
+                        .help("Topic name"),
                 )
                 .arg(
                     Arg::with_name("end")
@@ -117,6 +180,26 @@ pub fn main() {
         .subcommand(
             SubCommand::with_name("partitions")
                 .about("List partitions for a given topic")
+        .arg(
+            Arg::with_name("brokers")
+                .short("b")
+                .value_name("host[:port]")
+                .default_value("localhost:9092")
+                .multiple(true)
+                .help("Broker URI authority"),
+        )
+        .arg(
+            Arg::with_name("verbose")
+                .short("v")
+                .multiple(true)
+                .help("Sets the level of verbosity"),
+        )
+        .arg(
+            Arg::with_name("group")
+                .short("g")
+                .value_name("GROUP_ID")
+                .default_value("kio"),
+        )
                 .arg(
                     Arg::with_name("topic")
                         .short("t")
