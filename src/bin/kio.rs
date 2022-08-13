@@ -2,7 +2,7 @@ extern crate clap;
 #[macro_use]
 extern crate prettytable;
 
-use clap::{App, Arg, SubCommand};
+use clap::{App, Arg, Command};
 use kafka_io::{client, logger};
 use log::{debug, error, info, warn};
 use prettytable::Table;
@@ -24,7 +24,7 @@ pub fn main() {
         .about("Spew Kafka messages to stdout")
         .arg(
             Arg::with_name("brokers")
-                .short("b")
+                .short('b')
                 .value_name("host[:port]")
                 .default_value("localhost:9092")
                 .multiple(true)
@@ -32,25 +32,25 @@ pub fn main() {
         )
         .arg(
             Arg::with_name("verbose")
-                .short("v")
+                .short('v')
                 .multiple(true)
                 .help("Sets the level of verbosity"),
         )
         .arg(
             Arg::with_name("group")
-                .short("g")
+                .short('g')
                 .value_name("GROUP_ID")
                 .default_value("kio"),
         )
         .arg(
             Arg::with_name("interval")
-                .short("i")
+                .short('i')
                 .value_name("POLL_INTERVAL")
                 .default_value("5")
                 .help("Interval in seconds to poll for new events"),
         )
         .subcommand(
-            SubCommand::with_name("tail")
+            Command::with_name("tail")
                 .about("Continuously read from a given set of topics")
                 .arg(
                     Arg::with_name("topics")

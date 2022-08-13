@@ -11,7 +11,7 @@ description = "Easily read, write from and interact with Apache Kafka"
 
 [dependencies]
 chrono = "0.4.0"
-clap = "2.33"
+clap = "^3.1"
 env_logger = "0.7.1"
 log = "0.4"
 rdkafka = { version = "0.24", default_features = false }
