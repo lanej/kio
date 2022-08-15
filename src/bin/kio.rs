@@ -2,9 +2,9 @@ extern crate clap;
 #[macro_use]
 extern crate prettytable;
 
-use clap::{App, Arg, SubCommand};
+use clap::{App, Arg, Command};
 use kafka_io::{client, logger};
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use prettytable::Table;
 use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
 use rdkafka::consumer::base_consumer::BaseConsumer;
@@ -18,139 +18,89 @@ use std::time::{Duration, Instant};
 pub fn main() {
     logger::logger(false, None);
 
-    let matches = App::new("kio")
+    let app = App::new("kio")
         .version("0.1")
         .author("Josh Lane <me@joshualane.com>")
         .about("Interact with Kafka over stdout/stdin")
         .arg(
             Arg::with_name("brokers")
-                .short("b")
+                .short('b')
                 .value_name("host[:port]")
                 .default_value("localhost:9092")
-                .multiple(true)
+                .takes_value(true)
                 .help("Broker URI authority"),
         )
         .arg(
             Arg::with_name("verbose")
-                .short("v")
-                .multiple(true)
+                .short('v')
+                .value_name("UINT")
+                .default_value("0")
+                .takes_value(true)
+                .required(false)
                 .help("Sets the level of verbosity"),
         )
         .arg(
             Arg::with_name("group")
-                .short("g")
+                .short('g')
                 .value_name("GROUP_ID")
                 .default_value("kio"),
         )
         .arg(
             Arg::with_name("interval")
-                .short("i")
+                .short('i')
                 .value_name("POLL_INTERVAL")
                 .default_value("5")
                 .help("Interval in seconds to poll for new events"),
         )
         .subcommand(
-            SubCommand::with_name("tail")
+            Command::new("tail")
                 .about("Continuously read from a given set of topics")
                 .arg(
                     Arg::with_name("topics")
-                        .short("t")
+                        .short('t')
                         .value_name("TOPIC")
                         .multiple(true)
+                        .takes_value(true)
                         .required(true),
                 )
-        .arg(
-            Arg::with_name("brokers")
-                .short("b")
-                .value_name("host[:port]")
-                .default_value("localhost:9092")
-                .multiple(true)
-                .help("Broker URI authority"),
-        )
-        .arg(
-            Arg::with_name("verbose")
-                .short("v")
-                .multiple(true)
-                .help("Sets the level of verbosity"),
-        )
-        .arg(
-            Arg::with_name("group")
-                .short("g")
-                .value_name("GROUP_ID")
-                .default_value("kio"),
-        )
+                .arg(
+                    Arg::with_name("lines")
+                        .short('n')
+                        .value_name("UINT")
+                        .default_value("0"),
+                )
                 .arg(
                     Arg::with_name("full")
                         .long("full")
-                        .short("f")
+                        .short('f')
                         .help("Encapsulate payload in the message metadata"),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("write")
+            Command::new("write")
                 .about("Write an NLD set of messages to a given topic")
-        .arg(
-            Arg::with_name("brokers")
-                .short("b")
-                .value_name("host[:port]")
-                .default_value("localhost:9092")
-                .multiple(true)
-                .help("Broker URI authority"),
-        )
-        .arg(
-            Arg::with_name("verbose")
-                .short("v")
-                .multiple(true)
-                .help("Sets the level of verbosity"),
-        )
-        .arg(
-            Arg::with_name("group")
-                .short("g")
-                .value_name("GROUP_ID")
-                .default_value("kio"),
-        )
                 .arg(
                     Arg::with_name("topic")
-                        .short("t")
+                        .short('t')
                         .value_name("TOPIC")
                         .required(true)
                         .help("Topic name"),
                 )
                 .arg(
                     Arg::with_name("buffer_size")
-                        .short("s")
+                        .short('s')
                         .value_name("UINT")
-                        .default_value("100")
                         .required(true)
-                        .help("Buffer size"),
+                        .help("Buffer size")
+                        .default_value("100"),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("read")
+            Command::new("read")
                 .about("Read a specific range of messages from a given topic")
-        .arg(
-            Arg::with_name("brokers")
-                .short("b")
-                .value_name("host[:port]")
-                .default_value("localhost:9092")
-                .multiple(true)
-                .help("Broker URI authority"),
-        )
-        .arg(
-            Arg::with_name("verbose")
-                .short("v")
-                .multiple(true)
-                .help("Sets the level of verbosity"),
-        )
-        .arg(
-            Arg::with_name("group")
-                .short("g")
-                .value_name("GROUP_ID")
-                .default_value("kio"),
-        )
                 .arg(
                     Arg::with_name("topic")
-                        .short("t")
+                        .short('t')
                         .value_name("TOPIC")
                         .multiple(true)
                         .required(true)
@@ -159,59 +109,49 @@ pub fn main() {
                 .arg(
                     Arg::with_name("end")
                         .long("end")
-                        .short("e")
+                        .short('e')
                         .value_name("OFFSET")
                         .default_value("-1")
                         .allow_hyphen_values(true)
-                        .required(true)
                         .help("End offset inclusive"),
                 )
                 .arg(
                     Arg::with_name("start")
                         .long("start")
-                        .short("s")
+                        .short('s')
                         .default_value("0")
                         .value_name("OFFSET")
                         .allow_hyphen_values(true)
-                        .required(true)
                         .help("Starting offset exclusive"),
+                )
+                .arg(
+                    Arg::with_name("full")
+                        .long("full")
+                        .short('f')
+                        .help("Encapsulate payload in the message metadata"),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("partitions")
+            Command::new("partitions")
                 .about("List partitions for a given topic")
-        .arg(
-            Arg::with_name("brokers")
-                .short("b")
-                .value_name("host[:port]")
-                .default_value("localhost:9092")
-                .multiple(true)
-                .help("Broker URI authority"),
-        )
-        .arg(
-            Arg::with_name("verbose")
-                .short("v")
-                .multiple(true)
-                .help("Sets the level of verbosity"),
-        )
-        .arg(
-            Arg::with_name("group")
-                .short("g")
-                .value_name("GROUP_ID")
-                .default_value("kio"),
-        )
                 .arg(
                     Arg::with_name("topic")
-                        .short("t")
+                        .short('t')
                         .value_name("TOPIC")
                         .required(true),
                 ),
         )
-        .subcommand(SubCommand::with_name("topics").about("List topics"))
-        .get_matches();
+        .subcommand(Command::new("topics").about("List topics"));
+
+    let matches = app.get_matches();
 
     let brokers: Vec<&str> = matches.values_of("brokers").unwrap().collect();
-    let log_level = match matches.occurrences_of("v") {
+    let log_level = match matches
+        .value_of("verbose")
+        .unwrap()
+        .parse()
+        .expect("verbose to an integer")
+    {
         0 => RDKafkaLogLevel::Error,
         1 => RDKafkaLogLevel::Warning,
         2 => RDKafkaLogLevel::Info,
@@ -220,7 +160,7 @@ pub fn main() {
     };
 
     let group = matches.value_of("group").unwrap();
-    let config = client::config(group, brokers, log_level);
+    let mut config = client::config(group, brokers, log_level);
     let interval = matches
         .value_of("interval")
         .unwrap()
@@ -228,25 +168,30 @@ pub fn main() {
         .expect("from must be an integer");
 
     match matches.subcommand() {
-        ("tail", Some(tail_m)) => {
+        Some(("tail", tail_m)) => {
             let topics: Vec<&str> = tail_m.values_of("topics").unwrap().collect();
-            let full = tail_m.is_present("full");
-            tail(config, topics, interval, full);
+            tail(
+                &config,
+                topics,
+                interval,
+                tail_m.contains_id("full"),
+                OffsetRange::from((tail_m.value_of("lines"), None)),
+            )
         }
-        // ("list" => Some(list_m) => { },
-        ("read", Some(read_m)) => {
+        Some(("read", read_m)) => {
             read(
-                config,
+                &mut config,
                 read_m.value_of("topic").expect("No topic specified"),
                 interval,
+                read_m.contains_id("full"),
                 OffsetRange::from((read_m.value_of("start"), read_m.value_of("end"))),
             );
         }
-        ("partitions", Some(partition_m)) => {
+        Some(("partitions", partition_m)) => {
             let topic = partition_m.value_of("topic").unwrap();
             partitions(config, topic);
         }
-        ("topics", Some(_topic_m)) => {
+        Some(("topics", _topic_m)) => {
             let mut table = Table::new();
             table.add_row(row![bFg=>
                 "Topic",
@@ -269,7 +214,7 @@ pub fn main() {
 
             table.print_tty(true);
         }
-        ("write", Some(write_m)) => {
+        Some(("write", write_m)) => {
             let topic = write_m.value_of("topic").unwrap();
             let buffer_size: u64 = write_m
                 .value_of("buffer_size")
@@ -290,17 +235,45 @@ pub fn main() {
     };
 }
 
-fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64, full: bool) {
+fn tail(config: &ClientConfig, topics: Vec<&str>, interval: u64, full: bool, range: OffsetRange) {
     let consumer: BaseConsumer<DefaultConsumerContext> = config
         .create_with_context(rdkafka::consumer::DefaultConsumerContext)
         .expect("Consumer creation failed");
+    let poll_interval = Duration::from_secs(interval);
+    let mut topic_partitions = TopicPartitionList::new();
+    let metadata = consumer
+        .fetch_metadata(None, Duration::from_secs(10))
+        .unwrap();
+
+    topics.iter().for_each(|topic| {
+        let (min_offset, max_offset) = consumer
+            // FIXME: hard-coded partition should be variable
+            .fetch_watermarks(topic, 0, poll_interval)
+            .unwrap();
+
+        let (seek_to, _stop_at) = range.offsets(min_offset, max_offset);
+        let leader = metadata
+            .topics()
+            .iter()
+            .find_map(|mtopic| {
+                mtopic
+                    .partitions()
+                    .iter()
+                    .find(|partition| partition.id() == partition.leader())
+            })
+            .expect("Couldn't find leader");
+
+        // TODO: partition can be specified
+        topic_partitions.add_partition_offset(topic, leader.id(), seek_to);
+    });
+    consumer.assign(&topic_partitions).unwrap();
 
     consumer
         .subscribe(&topics)
         .expect("Can't subscribe to specified topics");
 
     loop {
-        match consumer.poll(Duration::from_secs(interval)) {
+        match consumer.poll(poll_interval) {
             Some(message) => match message {
                 Err(e) => warn!("Kafka error: {}", e),
                 Ok(m) => {
@@ -313,9 +286,9 @@ fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64, full: bool) {
                         }
                     };
 
-                    match serde_json::from_str::<serde_json::Value>(raw_payload) {
-                        Ok(payload) => {
-                            if full {
+                    if full {
+                        match serde_json::from_str::<serde_json::Value>(raw_payload) {
+                            Ok(payload) => {
                                 let timestamp = match m.timestamp() {
                                     rdkafka::message::Timestamp::NotAvailable => String::new(),
                                     rdkafka::message::Timestamp::CreateTime(t)
@@ -333,12 +306,14 @@ fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64, full: bool) {
                                         "payload": payload,
                                     })
                                 );
-                            } else {
-                                println!("{}", payload)
+                            }
+                            Err(err) => {
+                                eprintln!("Failed to parse JSON body '{}': {}", raw_payload, err)
                             }
                         }
-                        Err(err) => error!("Failed to parse JSON body: {}", err),
-                    };
+                    } else {
+                        println!("{}\n", raw_payload)
+                    }
                 }
             },
             _ => {}
@@ -346,24 +321,36 @@ fn tail(config: ClientConfig, topics: Vec<&str>, interval: u64, full: bool) {
     }
 }
 
-fn read(mut config: ClientConfig, topic: &str, interval: u64, range: OffsetRange) {
+fn read(config: &mut ClientConfig, topic: &str, interval: u64, full: bool, range: OffsetRange) {
     let consumer: BaseConsumer<DefaultConsumerContext> = config
         .set("enable.partition.eof", "true")
         .create_with_context(rdkafka::consumer::DefaultConsumerContext)
         .expect("Consumer creation failed");
 
     let poll_interval = Duration::from_secs(interval);
-    // FIXME: allow partition to be specified or calculated
-    let partition_id = 0;
+    let metadata = consumer
+        .fetch_metadata(None, Duration::from_secs(10))
+        .unwrap();
+    let leader = metadata
+        .topics()
+        .iter()
+        .find_map(|mtopic| {
+            mtopic
+                .partitions()
+                .iter()
+                .find(|partition| partition.id() == partition.leader())
+        })
+        .expect("Couldn't find leader");
+
     let (min_offset, max_offset) = consumer
-        .fetch_watermarks(topic, partition_id, poll_interval)
+        .fetch_watermarks(topic, leader.id(), poll_interval)
         .unwrap();
 
     let (seek_to, stop_at) = range.offsets(min_offset, max_offset);
 
     let mut topic_partitions = TopicPartitionList::new();
-    // TODO: partition can be specified
-    topic_partitions.add_partition_offset(topic, 0, seek_to);
+
+    topic_partitions.add_partition_offset(topic, leader.id(), seek_to);
     consumer.assign(&topic_partitions).unwrap();
 
     loop {
@@ -383,20 +370,26 @@ fn read(mut config: ClientConfig, topic: &str, interval: u64, range: OffsetRange
                         }
                     };
 
-                    match serde_json::from_str::<serde_json::Value>(payload) {
-                        Ok(body) => {
-                            println!(
-                                "{}",
-                                serde_json::json!({
-                                    "offset": m.offset(),
-                                    "partition": m.partition(),
-                                    "timestamp": m.timestamp().to_millis(),
-                                    "payload": body
-                                })
-                            );
-                        }
-                        Err(err) => eprintln!("Failed to parse JSON body: {}", err),
-                    };
+                    if full {
+                        match serde_json::from_str::<serde_json::Value>(payload) {
+                            Ok(body) => {
+                                println!(
+                                    "{}",
+                                    serde_json::json!({
+                                        "offset": m.offset(),
+                                        "partition": m.partition(),
+                                        "timestamp": m.timestamp().to_millis(),
+                                        "payload": body
+                                    })
+                                );
+                            }
+                            Err(err) => {
+                                eprintln!("Failed to parse JSON body '{}': {}", payload, err)
+                            }
+                        };
+                    } else {
+                        println!("{}", payload)
+                    }
                 }
             },
             _ => debug!("No messages received during last poll"),
@@ -409,6 +402,7 @@ fn write(config: ClientConfig, topic: &str, interval: u64, messages: impl Iterat
     let poll_interval = Duration::from_secs(interval);
     let mut next_flush = Instant::now() + poll_interval * 2;
     messages.for_each(|message| {
+        debug!("Sending: '{}'", &message);
         producer
             .send(BaseRecord::<String, String>::to(topic).payload(&message))
             .expect("Failed to send message");
@@ -420,7 +414,11 @@ fn write(config: ClientConfig, topic: &str, interval: u64, messages: impl Iterat
         }
     });
 
-    info!("flushing {} messages", producer.in_flight_count());
+    let in_flight_count = producer.in_flight_count();
+
+    if in_flight_count > 0 {
+        info!("flushing {} messages", in_flight_count);
+    }
     producer.flush(poll_interval);
 }
 
@@ -549,16 +547,24 @@ impl std::convert::From<(Option<&str>, Option<&str>)> for OffsetRange {
         OffsetRange {
             start: from
                 .map(|v| match v.chars().nth(0).unwrap() {
-                    '+' => OffsetPosition::Positive(v.get(1..).unwrap().parse().unwrap()),
-                    '-' => OffsetPosition::Negative(v.get(1..).unwrap().parse().unwrap()),
+                    '+' => {
+                        OffsetPosition::Positive(v.get(1..).unwrap().parse().expect("valid number"))
+                    }
+                    '-' => {
+                        OffsetPosition::Negative(v.get(1..).unwrap().parse().expect("valid number"))
+                    }
                     _ => OffsetPosition::Absolute(v.parse().unwrap()),
                 })
                 .unwrap_or(OffsetPosition::Unspecified),
             end: to
                 .map(|v| match v.chars().nth(0).unwrap() {
-                    '+' => OffsetPosition::Positive(v.get(1..).unwrap().parse().unwrap()),
-                    '-' => OffsetPosition::Negative(v.get(1..).unwrap().parse().unwrap()),
-                    _ => OffsetPosition::Absolute(v.parse().unwrap()),
+                    '+' => {
+                        OffsetPosition::Positive(v.get(1..).unwrap().parse().expect("valid number"))
+                    }
+                    '-' => {
+                        OffsetPosition::Negative(v.get(1..).unwrap().parse().expect("valid number"))
+                    }
+                    _ => OffsetPosition::Absolute(v.parse().expect("valid number")),
                 })
                 .unwrap_or(OffsetPosition::Unspecified),
         }
