@@ -166,12 +166,11 @@ pub fn main() {
     match matches.subcommand() {
         Some(("tail", tail_m)) => {
             let topics: Vec<&str> = tail_m.values_of("topics").unwrap().collect();
-            let full = tail_m.is_present("full");
             tail(
                 &config,
                 topics,
                 interval,
-                full,
+                tail_m.contains_id("full"),
                 OffsetRange::from((tail_m.value_of("lines"), None)),
             )
         }
@@ -180,7 +179,7 @@ pub fn main() {
                 &mut config,
                 read_m.value_of("topic").expect("No topic specified"),
                 interval,
-                read_m.is_present("full"),
+                read_m.contains_id("full"),
                 OffsetRange::from((read_m.value_of("start"), read_m.value_of("end"))),
             );
         }
@@ -303,7 +302,7 @@ fn tail(config: &ClientConfig, topics: Vec<&str>, interval: u64, full: bool, ran
                                         "payload": payload,
                                     })
                                 );
-                            }
+                            },
                             Err(err) => {
                                 eprintln!("Failed to parse JSON body '{}': {}", raw_payload, err)
                             }
