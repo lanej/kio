@@ -1,6 +1,6 @@
 [package]
 name = "kafka-io"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Joshua Lane <me@joshualane.com>"]
 edition = "2018"
 license = "MIT"
