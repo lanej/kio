@@ -25,6 +25,17 @@ kio read -s -1 collectd | jq -c
 {"k":"v"}
 ```
 
+**Write with envelope**
+
+Pass `-f`.  Requires JSON serialized data which is placed under `.payload`
+
+```
+$ kio -b nuc:9092 read collectd -s -3 -f| jq -c
+{"offset":913463667,"partition":0,"payload":[{"dsnames":["value"],"dstypes":["gauge"],"host":"nuc","interval":10,"plugin":"thermal","plugin_instance":"thermal_zone1","time":1660539487.832,"type":"temperature","type_instance":"","values":[36.5]}],"timestamp":1660539487832}
+{"offset":913463668,"partition":0,"payload":[{"dsnames":["user","syst"],"dstypes":["derive","derive"],"host":"nuc","interval":10,"plugin":"memcached","plugin_instance":"","time":1660539487.832,"type":"ps_cputime","type_instance":"","values":[196.598768966493,0]}],"timestamp":1660539487832}
+{"offset":913463669,"partition":0,"payload":[{"dsnames":["value"],"dstypes":["gauge"],"host":"nuc","interval":10,"plugin":"thermal","plugin_instance":"cooling_device0","time":1660539487.832,"type":"gauge","type_instance":"","values":[0]}],"timestamp":1660539487832}
+```
+
 ## Install
 
 `cargo install kafka-io`
