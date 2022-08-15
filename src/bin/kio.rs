@@ -132,7 +132,6 @@ pub fn main() {
                 .about("List partitions for a given topic")
                 .arg(
                     Arg::with_name("topic")
-                        .short('t')
                         .value_name("TOPIC")
                         .required(true),
                 ),

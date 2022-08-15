@@ -1,29 +1,52 @@
-# Install
+# Kio
+
+Interact with Kafka via Cli
+
+* Read or tail streams
+* Write to stream
+* Expose metadata
+
+## Examples
+
+**Last 3 messages on a given topic**
+
+```json
+kio -b kafka:9092 read -s -3 collectd | jq -c
+[{"values":[36.5],"dstypes":["gauge"],"dsnames":["value"],"time":1660539487.832,"interval":10,"host":"nuc","plugin":"thermal","plugin_instance":"thermal_zone1","type":"temperature","type_instance":""}]
+[{"values":[196.598768966493,0],"dstypes":["derive","derive"],"dsnames":["user","syst"],"time":1660539487.832,"interval":10,"host":"nuc","plugin":"memcached","plugin_instance":"","type":"ps_cputime","type_instance":""}]
+[{"values":[0],"dstypes":["gauge"],"dsnames":["value"],"time":1660539487.832,"interval":10,"host":"nuc","plugin":"thermal","plugin_instance":"cooling_device0","type":"gauge","type_instance":""}]
+```
+
+**Write message to topic**
+
+```sh
+echo '{"k":"v"}' | kio write kio
+kio read -s -1 collectd | jq -c
+{"k":"v"}
+```
+
+## Install
 
 `cargo install kafka-io`
 
-# Examples
-
-Write
-
-# Usage
+## Usage
 
 ```
-USAGE:
-    kio [FLAGS] [OPTIONS] [SUBCOMMAND]
+Interact with Kafka over stdout/stdin
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-    -v               Sets the level of verbosity
+USAGE:
+    kio [OPTIONS] [SUBCOMMAND]
 
 OPTIONS:
-    -b <host[:port]>...        Broker URI authority [default: localhost:9092]
-    -g <GROUP_ID>               [default: kio]
-    -i <POLL_INTERVAL>         Interval in seconds to poll for new events [default: 5]
+    -b <host[:port]>          Broker URI authority [default: localhost:9092]
+    -g <GROUP_ID>             [default: kio]
+    -h, --help                Print help information
+    -i <POLL_INTERVAL>        Interval in seconds to poll for new events [default: 5]
+    -v <UINT>                 Sets the level of verbosity [default: 0]
+    -V, --version             Print version information
 
 SUBCOMMANDS:
-    help          Prints this message or the help of the given subcommand(s)
+    help          Print this message or the help of the given subcommand(s)
     partitions    List partitions for a given topic
     read          Read a specific range of messages from a given topic
     tail          Continuously read from a given set of topics
@@ -31,38 +54,94 @@ SUBCOMMANDS:
     write         Write an NLD set of messages to a given topic
 ```
 
-## Write
+### Write
 
 ```
 Write an NLD set of messages to a given topic
 
 USAGE:
-    kio write -s <UINT> -t <TOPIC>
+    kio write [OPTIONS] <TOPIC>
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
+ARGS:
+    <TOPIC>    Topic name
 
 OPTIONS:
-    -s <UINT>         Buffer size [default: 100]
-    -t <TOPIC>        Topic name
+    -h, --help       Print help information
+    -s <UINT>        Buffer size [default: 100]
 ```
 
-## Read
+Example: `echo '{"k":"v"}' | kio write topic`
+
+### Read
 
 ```
-kio-read 
 Read a specific range of messages from a given topic
 
 USAGE:
-    kio read --end <OFFSET> --start <OFFSET> -t <TOPIC>...
+    kio read [OPTIONS] <TOPIC>...
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
+ARGS:
+    <TOPIC>...    Topic name
 
 OPTIONS:
     -e, --end <OFFSET>      End offset inclusive [default: -1]
+    -f, --full              Encapsulate payload in the message metadata
+    -h, --help              Print help information
     -s, --start <OFFSET>    Starting offset exclusive [default: 0]
-    -t <TOPIC>...           Topic name
 ```
+
+Example: `kio read topic | jq -c`
+
+### Topics
+
+```
+List topics
+
+USAGE:
+    kio topics
+
+OPTIONS:
+    -h, --help    Print help information
+```
+
+Example:
+
+```
+$ cargo run -q --bin kio -- -b nuc:9092 topics
++----------+--------------+------------------+--------------------+---------------+----------------+
+| Topic    | Partition ID | Partition Leader | Partition Replicas | Low Watermark | High Watermark |
++----------+--------------+------------------+--------------------+---------------+----------------+
+| bar      | 0            | 0                | 1                  | 42            | 204            |
++----------+--------------+------------------+--------------------+---------------+----------------+
+| bar      | 1            | 0                | 1                  | 47            | 188            |
++----------+--------------+------------------+--------------------+---------------+----------------+
+| foo      | 0            | 0                | 1                  | 36            | 36             |
++----------+--------------+------------------+--------------------+---------------+----------------+
+```
+
+### Partitions
+
+```
+List partitions for a given topic
+
+USAGE:
+    kio partitions <TOPIC>
+
+ARGS:
+    <TOPIC>
+
+OPTIONS:
+    -h, --help    Print help information
+```
+
+Example:
+
+```
+$ kio partitions topics
++--------------+------------------+--------------------+---------------+----------------+
+| Partition ID | Partition Leader | Partition Replicas | Low Watermark | High Watermark |
++--------------+------------------+--------------------+---------------+----------------+
+| 0            | 0                | 1                  | 42            | 204            |
++--------------+------------------+--------------------+---------------+----------------+
+| 1            | 0                | 1                  | 47            | 188            |
++--------------+------------------+--------------------+---------------+----------------+
