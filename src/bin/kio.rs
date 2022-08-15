@@ -90,7 +90,6 @@ pub fn main() {
                     Arg::with_name("buffer_size")
                         .short('s')
                         .value_name("UINT")
-                        .required(true)
                         .help("Buffer size")
                         .default_value("100"),
                 ),
