@@ -57,7 +57,6 @@ pub fn main() {
                 .about("Continuously read from a given set of topics")
                 .arg(
                     Arg::with_name("topics")
-                        .short('t')
                         .value_name("TOPIC")
                         .multiple(true)
                         .takes_value(true)
@@ -81,7 +80,6 @@ pub fn main() {
                 .about("Write an NLD set of messages to a given topic")
                 .arg(
                     Arg::with_name("topic")
-                        .short('t')
                         .value_name("TOPIC")
                         .required(true)
                         .help("Topic name"),
@@ -99,7 +97,6 @@ pub fn main() {
                 .about("Read a specific range of messages from a given topic")
                 .arg(
                     Arg::with_name("topic")
-                        .short('t')
                         .value_name("TOPIC")
                         .multiple(true)
                         .required(true)
